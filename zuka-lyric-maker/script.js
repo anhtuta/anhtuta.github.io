@@ -437,12 +437,11 @@ function loadSong(elem, event) {
     
     waveSurfer = WaveSurfer.create({
         container: '#waveform_container',
-        waveColor: '#ddd',
+        waveColor: '#aaa',
         progressColor: '#4CAF50',
         cursorColor: '#FF6B35',
-        barWidth: 3,
-        barGap: 2,
-        barRadius: 3,
+        barWidth: 10,
+        barGap: 1,
         responsive: true,
         height: 120,
         normalize: false,
