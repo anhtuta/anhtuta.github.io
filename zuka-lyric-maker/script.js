@@ -11,6 +11,8 @@ var lds_roller_wrapper = document.getElementsByClassName("lds-roller-wrapper")[0
 var btn_download_wrapper = document.getElementById("btn_download_wrapper");
 //var btn_toggle_time = document.getElementsByClassName("btn_toggle_time")[0];
 var cbShowTime = document.getElementById("cbShowTime");
+var waveform_container = document.getElementById("waveform_container");
+var waveSurfer;
 
 // thời điểm bắt đầu chạy nhạc (bắt đầu tạo lời bài hát)
 var startTime;
@@ -406,6 +408,7 @@ function loadSong(elem, event) {
 
     showLoading();
     audio_wrapper.innerHTML = "";
+    waveform_container.innerHTML = "";
 
     var url = file.urn ||file.name;
     loadUrl(url, null, FileAPIReader(file));
@@ -420,15 +423,47 @@ function loadSong(elem, event) {
     audio.setAttribute("controls", "");
     audio.setAttribute("id", "myAudio");
     
+    var blobUrl = URL.createObjectURL(elem.files[0]);
     var source = document.createElement("source");
-    source.src = URL.createObjectURL(elem.files[0]);
+    source.src = blobUrl;
     audio.appendChild(source);
     myAudio = audio;
     audio_wrapper.appendChild(audio);
     
-    btn_play.disabled = false;
+    // Initialize WaveSurfer for waveform visualization
+    if(waveSurfer) {
+        waveSurfer.destroy();
+    }
     
-    hideLoading();
+    waveSurfer = WaveSurfer.create({
+        container: '#waveform_container',
+        waveColor: '#ddd',
+        progressColor: '#4CAF50',
+        cursorColor: '#FF6B35',
+        barWidth: 3,
+        barGap: 2,
+        barRadius: 3,
+        responsive: true,
+        height: 120,
+        normalize: false,
+        minPxPerSec: 100,
+        hideScrollbar: true,
+    });
+    
+    // Load the audio blob URL directly
+    waveSurfer.load(blobUrl);
+    
+    // Update myAudio reference for WaveSurfer media sync
+    waveSurfer.on('ready', function() {
+        waveSurfer.setMediaElement(audio);
+        btn_play.disabled = false;
+        hideLoading();
+    });
+    
+    waveSurfer.on('error', function(error) {
+        console.error('WaveSurfer error:', error);
+        hideLoading();
+    });
 }
 
 function loadUrl(url, callback, reader) {
