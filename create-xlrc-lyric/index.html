@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -104,7 +105,7 @@
 
         .results-container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             gap: 20px;
             margin-top: 30px;
         }
@@ -160,8 +161,13 @@
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         .error {
@@ -196,6 +202,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -215,6 +222,7 @@
 
             <div class="controls">
                 <button class="btn" id="translateBtn" disabled>Translate to English</button>
+                <button class="btn" id="pinyinBtn" disabled>Translate to Pinyin</button>
                 <button class="btn" id="downloadBtn" disabled>Download Translation</button>
             </div>
 
@@ -229,27 +237,37 @@
                     <div class="lyric-content" id="originalLyrics"></div>
                 </div>
                 <div class="lyric-panel">
-                    <h2>English Translation</h2>
-                    <div class="lyric-content" id="translatedLyrics"></div>
+                    <h2 id="resultTitle">Result</h2>
+                    <div class="lyric-content" id="resultLyrics"></div>
                 </div>
             </div>
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pinyin-pro/3.27.0/index.min.js"
+        integrity="sha512-aE0DCH0yU7dYVnse3UBrM68g/oMZl8nhjoCYXfYxZbEOi31MHnzMGR0Kbv9CBvZEz0sSn2J7i5EngSVhrbxJig=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script>
         let originalLyricData = [];
         let translatedLyricData = [];
+        let pinyinLyricData = [];
+        let currentResultLines = [];
+        let currentDownloadSuffix = '_english.lrc';
         let fileName = '';
 
         const uploadSection = document.getElementById('uploadSection');
         const fileInput = document.getElementById('fileInput');
         const translateBtn = document.getElementById('translateBtn');
+        const pinyinBtn = document.getElementById('pinyinBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const loading = document.getElementById('loading');
+        const loadingText = loading.querySelector('p');
+        const defaultLoadingMessage = loadingText.textContent;
         const errorMessage = document.getElementById('errorMessage');
         const resultsContainer = document.getElementById('resultsContainer');
         const originalLyrics = document.getElementById('originalLyrics');
-        const translatedLyrics = document.getElementById('translatedLyrics');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultLyrics = document.getElementById('resultLyrics');
 
         // File upload handlers
         uploadSection.addEventListener('click', () => fileInput.click());
@@ -285,11 +303,12 @@
 
             fileName = file.name;
             const reader = new FileReader();
-            
+
             reader.onload = (e) => {
                 const content = e.target.result;
                 parseLrcFile(content);
                 translateBtn.disabled = false;
+                pinyinBtn.disabled = false;
                 uploadSection.innerHTML = `
                     <div class="upload-icon">✓</div>
                     <h3>${file.name}</h3>
@@ -314,7 +333,7 @@
 
                 // Match LRC format: [00:00.00]lyric text
                 const match = trimmedLine.match(/^(\[[\d:.]+\])(.*)/);
-                
+
                 if (match) {
                     originalLyricData.push({
                         timestamp: match[1],
@@ -344,11 +363,18 @@
             await translateLyrics();
         });
 
+        // Pinyin button handler
+        pinyinBtn.addEventListener('click', async () => {
+            await translateToPinyin();
+        });
+
         async function translateLyrics() {
             loading.classList.add('active');
             translateBtn.disabled = true;
             errorMessage.classList.remove('active');
             translatedLyricData = [];
+            resultTitle.textContent = 'English Translation';
+            currentDownloadSuffix = '_english.lrc';
 
             try {
                 // Extract only the lyric text (not timestamps or metadata)
@@ -366,7 +392,7 @@
                         batch.map(text => translateText(text))
                     );
                     translations.push(...batchTranslations);
-                    
+
                     // Small delay between batches
                     if (i + batchSize < textsToTranslate.length) {
                         await delay(500);
@@ -404,14 +430,14 @@
         async function translateText(text) {
             // Using Google Translate API (via MyMemory Translation API as a free alternative)
             // For production, you should use official Google Translate API with API key
-            
+
             const encodedText = encodeURIComponent(text);
             const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=zh|en`;
 
             try {
                 const response = await fetch(url);
                 const data = await response.json();
-                
+
                 if (data.responseStatus === 200 && data.responseData) {
                     return data.responseData.translatedText;
                 } else {
@@ -424,9 +450,53 @@
         }
 
         function displayTranslatedLyrics() {
-            translatedLyrics.textContent = translatedLyricData
-                .map(line => line.timestamp + line.text)
-                .join('\n');
+            currentResultLines = translatedLyricData
+                .map(line => line.timestamp + line.text);
+            resultLyrics.textContent = currentResultLines.join('\n');
+        }
+
+        async function translateToPinyin() {
+            const pinyinFn = window.pinyinPro && window.pinyinPro.pinyin;
+            if (!pinyinFn) {
+                showError('Pinyin library not loaded. Please check your connection.');
+                return;
+            }
+
+            resultTitle.textContent = 'Chinese + Pinyin';
+            currentDownloadSuffix = '-cn-py.xlrc';
+            loadingText.textContent = 'Converting to pinyin...';
+            loading.classList.add('active');
+            pinyinLyricData = [];
+
+            try {
+                originalLyricData.forEach(line => {
+                    const chineseLine = (line.timestamp || '') + line.text;
+                    pinyinLyricData.push(chineseLine);
+
+                    if (line.text) {
+                        const pinyinLine = pinyinFn(line.text, {
+                            toneType: 'mark',
+                            type: 'string',
+                            nonZh: 'spaced'
+                        });
+                        pinyinLyricData.push(`[tran1]${pinyinLine}`);
+                    }
+                });
+
+                displayPinyinLyrics();
+                downloadBtn.disabled = false;
+            } catch (error) {
+                showError('Pinyin conversion failed: ' + error.message);
+            } finally {
+                loading.classList.remove('active');
+                loadingText.textContent = defaultLoadingMessage;
+            }
+        }
+
+        function displayPinyinLyrics() {
+            currentResultLines = pinyinLyricData;
+            resultLyrics.textContent = currentResultLines.join('\n');
+            resultsContainer.style.display = 'grid';
         }
 
         function delay(ms) {
@@ -435,15 +505,14 @@
 
         // Download button handler
         downloadBtn.addEventListener('click', () => {
-            const content = translatedLyricData
-                .map(line => line.timestamp + line.text)
-                .join('\n');
-            
+            const content = currentResultLines.join('\n');
+
             const blob = new Blob([content], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = fileName.replace('.lrc', '_english.lrc');
+            const baseName = fileName.replace(/\.[^.]+$/, '') || fileName;
+            a.download = `${baseName}${currentDownloadSuffix}`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -459,4 +528,5 @@
         }
     </script>
 </body>
+
 </html>
