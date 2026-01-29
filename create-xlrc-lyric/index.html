@@ -206,8 +206,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>🎵 LRC Lyric Translator</h1>
-            <p>Translate your .lrc lyric files to English instantly</p>
+            <h1>🎵 Chinese LRC Lyric Translator</h1>
+            <p>Translate your .lrc lyric files in Chinese to Pinyin and English instantly</p>
         </header>
 
         <div class="main-content">
@@ -251,7 +251,6 @@
     <script>
         let originalLyricData = [];
         let translatedLyricData = [];
-        let pinyinLyricData = [];
         let currentResultLines = [];
         let currentDownloadSuffix = '_english.lrc';
         let fileName = '';
@@ -463,9 +462,49 @@
             resultLyrics.textContent = currentResultLines.join('\n');
         }
 
+        function getPinyinFn() {
+            return window.pinyinPro && window.pinyinPro.pinyin;
+        }
+
+        function convertToPinyin(text) {
+            const pinyinFn = getPinyinFn();
+            return pinyinFn(text, {
+                toneType: 'mark',
+                type: 'string',
+                nonZh: 'spaced'
+            });
+        }
+
+        async function fetchEnglishTranslations() {
+            const textsToTranslate = originalLyricData
+                .map(line => line.text)
+                .filter(text => text.length > 0);
+
+            const batchSize = 10;
+            const translations = [];
+
+            for (let i = 0; i < textsToTranslate.length; i += batchSize) {
+                const batch = textsToTranslate.slice(i, i + batchSize);
+                const batchTranslations = await Promise.all(
+                    batch.map(text => translateText(text))
+                );
+                translations.push(...batchTranslations);
+
+                if (i + batchSize < textsToTranslate.length) {
+                    await delay(500);
+                }
+            }
+            return translations;
+        }
+
+        function displayResult(resultLines) {
+            currentResultLines = resultLines;
+            resultLyrics.textContent = currentResultLines.join('\n');
+            resultsContainer.style.display = 'grid';
+        }
+
         async function translateToPinyin() {
-            const pinyinFn = window.pinyinPro && window.pinyinPro.pinyin;
-            if (!pinyinFn) {
+            if (!getPinyinFn()) {
                 showError('Pinyin library not loaded. Please check your connection.');
                 return;
             }
@@ -474,24 +513,20 @@
             currentDownloadSuffix = '-cn-py.xlrc';
             loadingText.textContent = 'Converting to pinyin...';
             loading.classList.add('active');
-            pinyinLyricData = [];
 
             try {
+                const resultLines = [];
                 originalLyricData.forEach(line => {
                     const chineseLine = (line.timestamp || '') + line.text;
-                    pinyinLyricData.push(chineseLine);
+                    resultLines.push(chineseLine);
 
                     if (line.text) {
-                        const pinyinLine = pinyinFn(line.text, {
-                            toneType: 'mark',
-                            type: 'string',
-                            nonZh: 'spaced'
-                        });
-                        pinyinLyricData.push(`[tran1]${pinyinLine}`);
+                        const pinyinLine = convertToPinyin(line.text);
+                        resultLines.push(`[tran1]${pinyinLine}`);
                     }
                 });
 
-                displayPinyinLyrics();
+                displayResult(resultLines);
                 downloadBtn.disabled = false;
             } catch (error) {
                 showError('Pinyin conversion failed: ' + error.message);
@@ -501,15 +536,8 @@
             }
         }
 
-        function displayPinyinLyrics() {
-            currentResultLines = pinyinLyricData;
-            resultLyrics.textContent = currentResultLines.join('\n');
-            resultsContainer.style.display = 'grid';
-        }
-
         async function translateToPinyinAndEnglish() {
-            const pinyinFn = window.pinyinPro && window.pinyinPro.pinyin;
-            if (!pinyinFn) {
+            if (!getPinyinFn()) {
                 showError('Pinyin library not loaded. Please check your connection.');
                 return;
             }
@@ -521,49 +549,25 @@
             errorMessage.classList.remove('active');
 
             try {
-                const textsToTranslate = originalLyricData
-                    .map(line => line.text)
-                    .filter(text => text.length > 0);
-
-                const batchSize = 10;
-                const translations = [];
-
-                for (let i = 0; i < textsToTranslate.length; i += batchSize) {
-                    const batch = textsToTranslate.slice(i, i + batchSize);
-                    const batchTranslations = await Promise.all(
-                        batch.map(text => translateText(text))
-                    );
-                    translations.push(...batchTranslations);
-
-                    if (i + batchSize < textsToTranslate.length) {
-                        await delay(500);
-                    }
-                }
-
+                const translations = await fetchEnglishTranslations();
+                const resultLines = [];
                 let translationIndex = 0;
-                const combinedLines = [];
 
                 originalLyricData.forEach(line => {
                     const chineseLine = (line.timestamp || '') + line.text;
-                    combinedLines.push(chineseLine);
+                    resultLines.push(chineseLine);
 
                     if (line.text) {
-                        const pinyinLine = pinyinFn(line.text, {
-                            toneType: 'mark',
-                            type: 'string',
-                            nonZh: 'spaced'
-                        });
-                        combinedLines.push(`[tran1]${pinyinLine}`);
+                        const pinyinLine = convertToPinyin(line.text);
+                        resultLines.push(`[tran1]${pinyinLine}`);
 
                         const englishLine = translations[translationIndex] || line.text;
-                        combinedLines.push(`[tran2]${englishLine}`);
+                        resultLines.push(`[tran2]${englishLine}`);
                         translationIndex++;
                     }
                 });
 
-                currentResultLines = combinedLines;
-                resultLyrics.textContent = currentResultLines.join('\n');
-                resultsContainer.style.display = 'grid';
+                displayResult(resultLines);
                 downloadBtn.disabled = false;
             } catch (error) {
                 showError('Combined translation failed: ' + error.message);
