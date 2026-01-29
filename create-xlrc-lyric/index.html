@@ -223,6 +223,7 @@
             <div class="controls">
                 <button class="btn" id="translateBtn" disabled>Translate to English</button>
                 <button class="btn" id="pinyinBtn" disabled>Translate to Pinyin</button>
+                <button class="btn" id="bothBtn" disabled>Translate to Pinyin + English</button>
                 <button class="btn" id="downloadBtn" disabled>Download Translation</button>
             </div>
 
@@ -259,6 +260,7 @@
         const fileInput = document.getElementById('fileInput');
         const translateBtn = document.getElementById('translateBtn');
         const pinyinBtn = document.getElementById('pinyinBtn');
+        const bothBtn = document.getElementById('bothBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const loading = document.getElementById('loading');
         const loadingText = loading.querySelector('p');
@@ -309,6 +311,7 @@
                 parseLrcFile(content);
                 translateBtn.disabled = false;
                 pinyinBtn.disabled = false;
+                bothBtn.disabled = false;
                 uploadSection.innerHTML = `
                     <div class="upload-icon">✓</div>
                     <h3>${file.name}</h3>
@@ -366,6 +369,11 @@
         // Pinyin button handler
         pinyinBtn.addEventListener('click', async () => {
             await translateToPinyin();
+        });
+
+        // Pinyin + English button handler
+        bothBtn.addEventListener('click', async () => {
+            await translateToPinyinAndEnglish();
         });
 
         async function translateLyrics() {
@@ -497,6 +505,72 @@
             currentResultLines = pinyinLyricData;
             resultLyrics.textContent = currentResultLines.join('\n');
             resultsContainer.style.display = 'grid';
+        }
+
+        async function translateToPinyinAndEnglish() {
+            const pinyinFn = window.pinyinPro && window.pinyinPro.pinyin;
+            if (!pinyinFn) {
+                showError('Pinyin library not loaded. Please check your connection.');
+                return;
+            }
+
+            resultTitle.textContent = 'Chinese + Pinyin + English';
+            currentDownloadSuffix = '-cn-py-en.xlrc';
+            loadingText.textContent = 'Converting to pinyin + English...';
+            loading.classList.add('active');
+            errorMessage.classList.remove('active');
+
+            try {
+                const textsToTranslate = originalLyricData
+                    .map(line => line.text)
+                    .filter(text => text.length > 0);
+
+                const batchSize = 10;
+                const translations = [];
+
+                for (let i = 0; i < textsToTranslate.length; i += batchSize) {
+                    const batch = textsToTranslate.slice(i, i + batchSize);
+                    const batchTranslations = await Promise.all(
+                        batch.map(text => translateText(text))
+                    );
+                    translations.push(...batchTranslations);
+
+                    if (i + batchSize < textsToTranslate.length) {
+                        await delay(500);
+                    }
+                }
+
+                let translationIndex = 0;
+                const combinedLines = [];
+
+                originalLyricData.forEach(line => {
+                    const chineseLine = (line.timestamp || '') + line.text;
+                    combinedLines.push(chineseLine);
+
+                    if (line.text) {
+                        const pinyinLine = pinyinFn(line.text, {
+                            toneType: 'mark',
+                            type: 'string',
+                            nonZh: 'spaced'
+                        });
+                        combinedLines.push(`[tran1]${pinyinLine}`);
+
+                        const englishLine = translations[translationIndex] || line.text;
+                        combinedLines.push(`[tran2]${englishLine}`);
+                        translationIndex++;
+                    }
+                });
+
+                currentResultLines = combinedLines;
+                resultLyrics.textContent = currentResultLines.join('\n');
+                resultsContainer.style.display = 'grid';
+                downloadBtn.disabled = false;
+            } catch (error) {
+                showError('Combined translation failed: ' + error.message);
+            } finally {
+                loading.classList.remove('active');
+                loadingText.textContent = defaultLoadingMessage;
+            }
         }
 
         function delay(ms) {
