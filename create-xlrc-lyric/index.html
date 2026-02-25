@@ -224,6 +224,7 @@
                 <button class="btn" id="translateBtn" disabled>Translate to English</button>
                 <button class="btn" id="pinyinBtn" disabled>Translate to Pinyin</button>
                 <button class="btn" id="bothBtn" disabled>Translate to Pinyin + English</button>
+                <button class="btn" id="vietnameseBtn" disabled>Translate to Pinyin + Vietnamese</button>
                 <button class="btn" id="downloadBtn" disabled>Download Translation</button>
             </div>
 
@@ -260,6 +261,7 @@
         const translateBtn = document.getElementById('translateBtn');
         const pinyinBtn = document.getElementById('pinyinBtn');
         const bothBtn = document.getElementById('bothBtn');
+        const vietnameseBtn = document.getElementById('vietnameseBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const loading = document.getElementById('loading');
         const loadingText = loading.querySelector('p');
@@ -308,9 +310,7 @@
             reader.onload = (e) => {
                 const content = e.target.result;
                 parseLrcFile(content);
-                translateBtn.disabled = false;
-                pinyinBtn.disabled = false;
-                bothBtn.disabled = false;
+                enableAllTranslationButtons();
                 uploadSection.innerHTML = `
                     <div class="upload-icon">✓</div>
                     <h3>${file.name}</h3>
@@ -333,21 +333,18 @@
                 const trimmedLine = line.trim();
                 if (!trimmedLine) return;
 
-                // Match LRC format: [00:00.00]lyric text
-                const match = trimmedLine.match(/^(\[[\d:.]+\])(.*)/);
+                // Match LRC timestamp format: [MM:SS.MS] or [M:S.M] with flexible digit counts
+                // Matches: [00:15.038], [00:15.03], [0:1.8], etc.
+                const match = trimmedLine.match(/^(\[\d{1,2}:\d{1,2}\.\d{1,3}\])(.*)/);
 
                 if (match) {
+                    // Valid timestamp line - add for translation
                     originalLyricData.push({
                         timestamp: match[1],
                         text: match[2].trim()
                     });
-                } else {
-                    // Metadata or non-timestamped line
-                    originalLyricData.push({
-                        timestamp: '',
-                        text: trimmedLine
-                    });
                 }
+                // Ignore metadata lines without timestamps
             });
 
             displayOriginalLyrics();
@@ -375,9 +372,28 @@
             await translateToPinyinAndEnglish();
         });
 
+        // Pinyin + Vietnamese button handler
+        vietnameseBtn.addEventListener('click', async () => {
+            await translateToPinyinAndVietnamese();
+        });
+
+        function disableAllTranslationButtons() {
+            translateBtn.disabled = true;
+            pinyinBtn.disabled = true;
+            bothBtn.disabled = true;
+            vietnameseBtn.disabled = true;
+        }
+
+        function enableAllTranslationButtons() {
+            translateBtn.disabled = false;
+            pinyinBtn.disabled = false;
+            bothBtn.disabled = false;
+            vietnameseBtn.disabled = false;
+        }
+
         async function translateLyrics() {
             loading.classList.add('active');
-            translateBtn.disabled = true;
+            disableAllTranslationButtons();
             errorMessage.classList.remove('active');
             translatedLyricData = [];
             resultTitle.textContent = 'English Translation';
@@ -430,7 +446,7 @@
                 showError('Translation failed: ' + error.message);
             } finally {
                 loading.classList.remove('active');
-                translateBtn.disabled = false;
+                enableAllTranslationButtons();
             }
         }
 
@@ -452,6 +468,26 @@
                 }
             } catch (error) {
                 console.error('Translation error:', error);
+                return text; // Return original text if translation fails
+            }
+        }
+
+        async function translateTextToVietnamese(text) {
+            // Using MyMemory Translation API for Vietnamese translation
+            const encodedText = encodeURIComponent(text);
+            const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=zh|vi`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.responseStatus === 200 && data.responseData) {
+                    return data.responseData.translatedText;
+                } else {
+                    throw new Error('Translation service error');
+                }
+            } catch (error) {
+                console.error('Vietnamese translation error:', error);
                 return text; // Return original text if translation fails
             }
         }
@@ -497,6 +533,28 @@
             return translations;
         }
 
+        async function fetchVietnameseTranslations() {
+            const textsToTranslate = originalLyricData
+                .map(line => line.text)
+                .filter(text => text.length > 0);
+
+            const batchSize = 10;
+            const translations = [];
+
+            for (let i = 0; i < textsToTranslate.length; i += batchSize) {
+                const batch = textsToTranslate.slice(i, i + batchSize);
+                const batchTranslations = await Promise.all(
+                    batch.map(text => translateTextToVietnamese(text))
+                );
+                translations.push(...batchTranslations);
+
+                if (i + batchSize < textsToTranslate.length) {
+                    await delay(500);
+                }
+            }
+            return translations;
+        }
+
         function displayResult(resultLines) {
             currentResultLines = resultLines;
             resultLyrics.textContent = currentResultLines.join('\n');
@@ -513,6 +571,7 @@
             currentDownloadSuffix = '-cn-py.xlrc';
             loadingText.textContent = 'Converting to pinyin...';
             loading.classList.add('active');
+            disableAllTranslationButtons();
 
             try {
                 const resultLines = [];
@@ -533,6 +592,7 @@
             } finally {
                 loading.classList.remove('active');
                 loadingText.textContent = defaultLoadingMessage;
+                enableAllTranslationButtons();
             }
         }
 
@@ -546,6 +606,7 @@
             currentDownloadSuffix = '-cn-py-en.xlrc';
             loadingText.textContent = 'Converting to pinyin + English...';
             loading.classList.add('active');
+            disableAllTranslationButtons();
             errorMessage.classList.remove('active');
 
             try {
@@ -574,6 +635,50 @@
             } finally {
                 loading.classList.remove('active');
                 loadingText.textContent = defaultLoadingMessage;
+                enableAllTranslationButtons();
+            }
+        }
+
+        async function translateToPinyinAndVietnamese() {
+            if (!getPinyinFn()) {
+                showError('Pinyin library not loaded. Please check your connection.');
+                return;
+            }
+
+            resultTitle.textContent = 'Chinese + Pinyin + Vietnamese';
+            currentDownloadSuffix = '-cn-py-vi.xlrc';
+            loadingText.textContent = 'Converting to pinyin + Vietnamese...';
+            loading.classList.add('active');
+            disableAllTranslationButtons();
+            errorMessage.classList.remove('active');
+
+            try {
+                const translations = await fetchVietnameseTranslations();
+                const resultLines = [];
+                let translationIndex = 0;
+
+                originalLyricData.forEach(line => {
+                    const chineseLine = (line.timestamp || '') + line.text;
+                    resultLines.push(chineseLine);
+
+                    if (line.text) {
+                        const pinyinLine = convertToPinyin(line.text);
+                        resultLines.push(`[tran1]${pinyinLine}`);
+
+                        const vietnameseLine = translations[translationIndex] || line.text;
+                        resultLines.push(`[tran2]${vietnameseLine}`);
+                        translationIndex++;
+                    }
+                });
+
+                displayResult(resultLines);
+                downloadBtn.disabled = false;
+            } catch (error) {
+                showError('Combined translation failed: ' + error.message);
+            } finally {
+                loading.classList.remove('active');
+                loadingText.textContent = defaultLoadingMessage;
+                enableAllTranslationButtons();
             }
         }
 
