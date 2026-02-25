@@ -70,6 +70,12 @@
             background: #e8e8ff;
         }
 
+        .upload-section.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            cursor: not-allowed;
+        }
+
         .file-input {
             display: none;
         }
@@ -369,12 +375,24 @@
 
         // Pinyin + English button handler
         bothBtn.addEventListener('click', async () => {
-            await translateToPinyinAndEnglish();
+            await translatePinyinAndLanguage({
+                resultTitle: 'Chinese + Pinyin + English',
+                downloadSuffix: '-cn-py-en.xlrc',
+                loadingMessage: 'Converting to pinyin + English...',
+                translationFn: translateText,
+                translationMarker: 'tran2'
+            });
         });
 
         // Pinyin + Vietnamese button handler
         vietnameseBtn.addEventListener('click', async () => {
-            await translateToPinyinAndVietnamese();
+            await translatePinyinAndLanguage({
+                resultTitle: 'Chinese + Pinyin + Vietnamese',
+                downloadSuffix: '-cn-py-vi.xlrc',
+                loadingMessage: 'Converting to pinyin + Vietnamese...',
+                translationFn: translateTextToVietnamese,
+                translationMarker: 'tran2'
+            });
         });
 
         function disableAllTranslationButtons() {
@@ -382,6 +400,7 @@
             pinyinBtn.disabled = true;
             bothBtn.disabled = true;
             vietnameseBtn.disabled = true;
+            uploadSection.classList.add('disabled');
         }
 
         function enableAllTranslationButtons() {
@@ -389,6 +408,7 @@
             pinyinBtn.disabled = false;
             bothBtn.disabled = false;
             vietnameseBtn.disabled = false;
+            uploadSection.classList.remove('disabled');
         }
 
         async function translateLyrics() {
@@ -450,12 +470,10 @@
             }
         }
 
-        async function translateText(text) {
-            // Using Google Translate API (via MyMemory Translation API as a free alternative)
-            // For production, you should use official Google Translate API with API key
-
+        async function translateToLanguage(text, langpair) {
+            // Generic translation function using MyMemory Translation API
             const encodedText = encodeURIComponent(text);
-            const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=zh|en`;
+            const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=${langpair}`;
 
             try {
                 const response = await fetch(url);
@@ -472,24 +490,12 @@
             }
         }
 
+        async function translateText(text) {
+            return translateToLanguage(text, 'zh|en');
+        }
+
         async function translateTextToVietnamese(text) {
-            // Using MyMemory Translation API for Vietnamese translation
-            const encodedText = encodeURIComponent(text);
-            const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=zh|vi`;
-
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-
-                if (data.responseStatus === 200 && data.responseData) {
-                    return data.responseData.translatedText;
-                } else {
-                    throw new Error('Translation service error');
-                }
-            } catch (error) {
-                console.error('Vietnamese translation error:', error);
-                return text; // Return original text if translation fails
-            }
+            return translateToLanguage(text, 'zh|vi');
         }
 
         function displayTranslatedLyrics() {
@@ -511,7 +517,7 @@
             });
         }
 
-        async function fetchEnglishTranslations() {
+        async function fetchTranslations(translationFn) {
             const textsToTranslate = originalLyricData
                 .map(line => line.text)
                 .filter(text => text.length > 0);
@@ -522,29 +528,7 @@
             for (let i = 0; i < textsToTranslate.length; i += batchSize) {
                 const batch = textsToTranslate.slice(i, i + batchSize);
                 const batchTranslations = await Promise.all(
-                    batch.map(text => translateText(text))
-                );
-                translations.push(...batchTranslations);
-
-                if (i + batchSize < textsToTranslate.length) {
-                    await delay(500);
-                }
-            }
-            return translations;
-        }
-
-        async function fetchVietnameseTranslations() {
-            const textsToTranslate = originalLyricData
-                .map(line => line.text)
-                .filter(text => text.length > 0);
-
-            const batchSize = 10;
-            const translations = [];
-
-            for (let i = 0; i < textsToTranslate.length; i += batchSize) {
-                const batch = textsToTranslate.slice(i, i + batchSize);
-                const batchTranslations = await Promise.all(
-                    batch.map(text => translateTextToVietnamese(text))
+                    batch.map(text => translationFn(text))
                 );
                 translations.push(...batchTranslations);
 
@@ -559,6 +543,27 @@
             currentResultLines = resultLines;
             resultLyrics.textContent = currentResultLines.join('\n');
             resultsContainer.style.display = 'grid';
+        }
+
+        function buildPinyinAndTranslationResult(translations, translationMarker) {
+            const resultLines = [];
+            let translationIndex = 0;
+
+            originalLyricData.forEach(line => {
+                const chineseLine = (line.timestamp || '') + line.text;
+                resultLines.push(chineseLine);
+
+                if (line.text) {
+                    const pinyinLine = convertToPinyin(line.text);
+                    resultLines.push(`[tran1]${pinyinLine}`);
+
+                    const translationLine = translations[translationIndex] || line.text;
+                    resultLines.push(`[${translationMarker}]${translationLine}`);
+                    translationIndex++;
+                }
+            });
+
+            return resultLines;
         }
 
         async function translateToPinyin() {
@@ -596,81 +601,22 @@
             }
         }
 
-        async function translateToPinyinAndEnglish() {
+        async function translatePinyinAndLanguage(config) {
             if (!getPinyinFn()) {
                 showError('Pinyin library not loaded. Please check your connection.');
                 return;
             }
 
-            resultTitle.textContent = 'Chinese + Pinyin + English';
-            currentDownloadSuffix = '-cn-py-en.xlrc';
-            loadingText.textContent = 'Converting to pinyin + English...';
+            resultTitle.textContent = config.resultTitle;
+            currentDownloadSuffix = config.downloadSuffix;
+            loadingText.textContent = config.loadingMessage;
             loading.classList.add('active');
             disableAllTranslationButtons();
             errorMessage.classList.remove('active');
 
             try {
-                const translations = await fetchEnglishTranslations();
-                const resultLines = [];
-                let translationIndex = 0;
-
-                originalLyricData.forEach(line => {
-                    const chineseLine = (line.timestamp || '') + line.text;
-                    resultLines.push(chineseLine);
-
-                    if (line.text) {
-                        const pinyinLine = convertToPinyin(line.text);
-                        resultLines.push(`[tran1]${pinyinLine}`);
-
-                        const englishLine = translations[translationIndex] || line.text;
-                        resultLines.push(`[tran2]${englishLine}`);
-                        translationIndex++;
-                    }
-                });
-
-                displayResult(resultLines);
-                downloadBtn.disabled = false;
-            } catch (error) {
-                showError('Combined translation failed: ' + error.message);
-            } finally {
-                loading.classList.remove('active');
-                loadingText.textContent = defaultLoadingMessage;
-                enableAllTranslationButtons();
-            }
-        }
-
-        async function translateToPinyinAndVietnamese() {
-            if (!getPinyinFn()) {
-                showError('Pinyin library not loaded. Please check your connection.');
-                return;
-            }
-
-            resultTitle.textContent = 'Chinese + Pinyin + Vietnamese';
-            currentDownloadSuffix = '-cn-py-vi.xlrc';
-            loadingText.textContent = 'Converting to pinyin + Vietnamese...';
-            loading.classList.add('active');
-            disableAllTranslationButtons();
-            errorMessage.classList.remove('active');
-
-            try {
-                const translations = await fetchVietnameseTranslations();
-                const resultLines = [];
-                let translationIndex = 0;
-
-                originalLyricData.forEach(line => {
-                    const chineseLine = (line.timestamp || '') + line.text;
-                    resultLines.push(chineseLine);
-
-                    if (line.text) {
-                        const pinyinLine = convertToPinyin(line.text);
-                        resultLines.push(`[tran1]${pinyinLine}`);
-
-                        const vietnameseLine = translations[translationIndex] || line.text;
-                        resultLines.push(`[tran2]${vietnameseLine}`);
-                        translationIndex++;
-                    }
-                });
-
+                const translations = await fetchTranslations(config.translationFn);
+                const resultLines = buildPinyinAndTranslationResult(translations, config.translationMarker);
                 displayResult(resultLines);
                 downloadBtn.disabled = false;
             } catch (error) {
