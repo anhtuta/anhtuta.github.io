@@ -156,6 +156,37 @@
             display: block;
         }
 
+        .progress-bar-container {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .progress-bar-container.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
         .spinner {
             border: 4px solid #f3f3f3;
             border-top: 4px solid #667eea;
@@ -239,6 +270,12 @@
                 <p>Translating lyrics...</p>
             </div>
 
+            <div class="progress-bar-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill">0%</div>
+                </div>
+            </div>
+
             <div class="results-container" id="resultsContainer" style="display: none;">
                 <div class="lyric-panel">
                     <h2>Original Lyrics</h2>
@@ -272,6 +309,8 @@
         const loading = document.getElementById('loading');
         const loadingText = loading.querySelector('p');
         const defaultLoadingMessage = loadingText.textContent;
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
         const errorMessage = document.getElementById('errorMessage');
         const resultsContainer = document.getElementById('resultsContainer');
         const originalLyrics = document.getElementById('originalLyrics');
@@ -395,6 +434,21 @@
             });
         });
 
+        function updateProgress(percentage) {
+            const clampedPercent = Math.min(100, Math.max(0, percentage));
+            progressFill.style.width = clampedPercent + '%';
+            progressFill.textContent = Math.round(clampedPercent) + '%';
+        }
+
+        function showProgressBar() {
+            progressContainer.classList.add('active');
+            updateProgress(0);
+        }
+
+        function hideProgressBar() {
+            progressContainer.classList.remove('active');
+        }
+
         function disableAllTranslationButtons() {
             translateBtn.disabled = true;
             pinyinBtn.disabled = true;
@@ -418,6 +472,7 @@
             translatedLyricData = [];
             resultTitle.textContent = 'English Translation';
             currentDownloadSuffix = '_english.lrc';
+            showProgressBar();
 
             try {
                 // Extract only the lyric text (not timestamps or metadata)
@@ -428,6 +483,7 @@
                 // Translate in batches to avoid rate limits
                 const batchSize = 10;
                 const translations = [];
+                const totalBatches = Math.ceil(textsToTranslate.length / batchSize);
 
                 for (let i = 0; i < textsToTranslate.length; i += batchSize) {
                     const batch = textsToTranslate.slice(i, i + batchSize);
@@ -435,6 +491,11 @@
                         batch.map(text => translateText(text))
                     );
                     translations.push(...batchTranslations);
+
+                    // Update progress
+                    const currentBatch = Math.floor(i / batchSize) + 1;
+                    const progress = (currentBatch / totalBatches) * 100;
+                    updateProgress(progress);
 
                     // Small delay between batches
                     if (i + batchSize < textsToTranslate.length) {
@@ -461,12 +522,14 @@
 
                 displayTranslatedLyrics();
                 downloadBtn.disabled = false;
+                updateProgress(100);
 
             } catch (error) {
                 showError('Translation failed: ' + error.message);
             } finally {
                 loading.classList.remove('active');
                 enableAllTranslationButtons();
+                setTimeout(hideProgressBar, 500);
             }
         }
 
@@ -524,6 +587,7 @@
 
             const batchSize = 10;
             const translations = [];
+            const totalBatches = Math.ceil(textsToTranslate.length / batchSize);
 
             for (let i = 0; i < textsToTranslate.length; i += batchSize) {
                 const batch = textsToTranslate.slice(i, i + batchSize);
@@ -531,6 +595,11 @@
                     batch.map(text => translationFn(text))
                 );
                 translations.push(...batchTranslations);
+
+                // Update progress
+                const currentBatch = Math.floor(i / batchSize) + 1;
+                const progress = (currentBatch / totalBatches) * 100;
+                updateProgress(progress);
 
                 if (i + batchSize < textsToTranslate.length) {
                     await delay(500);
@@ -577,9 +646,13 @@
             loadingText.textContent = 'Converting to pinyin...';
             loading.classList.add('active');
             disableAllTranslationButtons();
+            showProgressBar();
 
             try {
                 const resultLines = [];
+                const totalLines = originalLyricData.filter(line => line.text).length;
+                let processedLines = 0;
+
                 originalLyricData.forEach(line => {
                     const chineseLine = (line.timestamp || '') + line.text;
                     resultLines.push(chineseLine);
@@ -587,17 +660,22 @@
                     if (line.text) {
                         const pinyinLine = convertToPinyin(line.text);
                         resultLines.push(`[tran1]${pinyinLine}`);
+                        processedLines++;
+                        const progress = (processedLines / totalLines) * 100;
+                        updateProgress(progress);
                     }
                 });
 
                 displayResult(resultLines);
                 downloadBtn.disabled = false;
+                updateProgress(100);
             } catch (error) {
                 showError('Pinyin conversion failed: ' + error.message);
             } finally {
                 loading.classList.remove('active');
                 loadingText.textContent = defaultLoadingMessage;
                 enableAllTranslationButtons();
+                setTimeout(hideProgressBar, 500);
             }
         }
 
@@ -613,18 +691,21 @@
             loading.classList.add('active');
             disableAllTranslationButtons();
             errorMessage.classList.remove('active');
+            showProgressBar();
 
             try {
                 const translations = await fetchTranslations(config.translationFn);
                 const resultLines = buildPinyinAndTranslationResult(translations, config.translationMarker);
                 displayResult(resultLines);
                 downloadBtn.disabled = false;
+                updateProgress(100);
             } catch (error) {
                 showError('Combined translation failed: ' + error.message);
             } finally {
                 loading.classList.remove('active');
                 loadingText.textContent = defaultLoadingMessage;
                 enableAllTranslationButtons();
+                setTimeout(hideProgressBar, 500);
             }
         }
 
